@@ -11,7 +11,7 @@ public class NetworkTestUI : MonoBehaviour
         if (network == null)
             return;
 
-        GUILayout.BeginArea(new Rect(20, 20, 280, 220));
+        GUILayout.BeginArea(new Rect(20, 20, 350, 400));
 
         if (!network.IsListening)
         {
@@ -30,12 +30,29 @@ public class NetworkTestUI : MonoBehaviour
                     : "Connecting...");
 
             if (network.IsServer)
-            {
                 GUILayout.Label(
-                    "Connected Clients: " +
-                    network.ConnectedClientsIds.Count
+                    $"Connected Clients: {network.ConnectedClientsIds.Count}"
                 );
+
+            if (PokerTableManager.Instance != null &&
+                PokerTableManager.Instance.IsSpawned)
+            {
+                var players = PokerTableManager.Instance.Players;
+
+                GUILayout.Space(15);
+                GUILayout.Label($"Poker Table ({players.Count}/6)");
+
+                foreach (var player in players)
+                {
+                    GUILayout.Label(
+                        $"Seat {player.SeatIndex + 1} | " +
+                        $"Player {player.ClientId} | " +
+                        $"{player.Chips} Chips"
+                    );
+                }
             }
+
+            GUILayout.Space(15);
 
             if (GUILayout.Button("Disconnect"))
                 network.Shutdown();
