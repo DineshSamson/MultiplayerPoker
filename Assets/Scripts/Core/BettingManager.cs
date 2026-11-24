@@ -45,7 +45,7 @@ public class BettingManager
         }
 
         //CurrentTurnSeat = FindNextEligible(firstSeat - 1);
-        CurrentTurnSeat = FindNextEligible((firstSeat + 5) % 6);
+        CurrentTurnSeat = firstSeat < 0 ? -1 : FindNextEligible((firstSeat + 5) % 6);
     }
 
     public bool TryAction(
@@ -169,34 +169,42 @@ public class BettingManager
         return true;
     }
 
+    public void FoldDisconnectedPlayer(int seat)
+    {
+        PokerPlayer player = players.Find(p => p.SeatIndex == seat);
+        if (player == null || player.IsFolded || player.IsAllIn)
+            return;
+
+        player.IsFolded = true;
+        player.HasActed = true;
+        player.LastAction = PokerAction.Fold;
+
+        if (CurrentTurnSeat == seat)
+            CurrentTurnSeat = FindNextEligible(seat);
+    }
+
     public bool IsRoundComplete()
     {
         int activeCount = 0;
-
+        PokerPlayer lastActive = null;
         foreach (var player in players)
         {
-            if (!player.IsFolded && !player.IsAllIn)
-            {
-                activeCount++;
-
-                if (!player.HasActed ||
-                    player.CurrentBet != CurrentBet)
-                    return false;
-            }
+            if (player.IsFolded || player.IsAllIn || player.Chips <= 0)
+                continue;
+            activeCount++;
+            lastActive = player;
         }
+        if (activeCount == 0) return true;
+        if (activeCount == 1)
+            return lastActive.CurrentBet >= CurrentBet;
 
-        return activeCount <= 1 || AllMatched();
-    }
-
-    private bool AllMatched()
-    {
         foreach (var player in players)
         {
-            if (!player.IsFolded && !player.IsAllIn &&
-                player.CurrentBet != CurrentBet)
+            if (player.IsFolded || player.IsAllIn || player.Chips <= 0)
+                continue;
+            if (!player.HasActed || player.CurrentBet != CurrentBet)
                 return false;
         }
-
         return true;
     }
 

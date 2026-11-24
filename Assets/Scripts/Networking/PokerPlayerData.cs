@@ -1,6 +1,7 @@
 
 using System;
 using Unity.Netcode;
+using Unity.Collections;
 
 public struct PokerPlayerData :
     INetworkSerializable, IEquatable<PokerPlayerData>
@@ -15,6 +16,10 @@ public struct PokerPlayerData :
     public bool IsFolded;
     public bool IsAllIn;
     public bool HasActed;
+    public bool HasDealtCards;
+    // Empty until the server authorizes a contested showdown reveal.
+    public FixedString64Bytes RevealedCard1;
+    public FixedString64Bytes RevealedCard2;
 
     // -1 means no action yet.
     public int LastAction;
@@ -31,6 +36,9 @@ public struct PokerPlayerData :
         IsFolded = false;
         IsAllIn = false;
         HasActed = false;
+        HasDealtCards = false;
+        RevealedCard1 = default;
+        RevealedCard2 = default;
         LastAction = -1;
     }
 
@@ -46,6 +54,9 @@ public struct PokerPlayerData :
         serializer.SerializeValue(ref IsFolded);
         serializer.SerializeValue(ref IsAllIn);
         serializer.SerializeValue(ref HasActed);
+        serializer.SerializeValue(ref HasDealtCards);
+        serializer.SerializeValue(ref RevealedCard1);
+        serializer.SerializeValue(ref RevealedCard2);
         serializer.SerializeValue(ref LastAction);
     }
 
@@ -60,6 +71,9 @@ public struct PokerPlayerData :
             && IsFolded == other.IsFolded
             && IsAllIn == other.IsAllIn
             && HasActed == other.HasActed
+            && HasDealtCards == other.HasDealtCards
+            && RevealedCard1.Equals(other.RevealedCard1)
+            && RevealedCard2.Equals(other.RevealedCard2)
             && LastAction == other.LastAction;
     }
 }

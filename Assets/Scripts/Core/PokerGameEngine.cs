@@ -81,7 +81,11 @@ public class PokerGameEngine
         IsPotSettled = false;
 
         foreach (var player in Players)
+        {
             player.ResetForNewHand();
+            if (player.Chips <= 0)
+                player.IsFolded = true;
+        }
 
         int firstSeat = NextSeat(DealerSeat, active);
         var dealOrder = RotateFrom(active, firstSeat);
@@ -129,7 +133,7 @@ public class PokerGameEngine
             return false;
 
         var remaining = Players.Where(p =>
-            !p.IsFolded && p.TotalContribution > 0).ToList();
+            !p.IsFolded).ToList();
 
         if (remaining.Count != 1)
             return false;
@@ -168,9 +172,6 @@ public class PokerGameEngine
             return true;
 
         int firstToAct = FindNextActiveSeat(DealerSeat);
-
-        if (firstToAct == -1)
-            return true;
 
         Betting.StartRound(firstToAct, false);
 
@@ -229,7 +230,7 @@ public class PokerGameEngine
                 "Showdown has not started.");
 
         var eligible = Players.Where(p =>
-            !p.IsFolded && p.TotalContribution > 0).ToList();
+            !p.IsFolded).ToList();
 
         if (eligible.Count == 0)
             throw new InvalidOperationException("No eligible players.");

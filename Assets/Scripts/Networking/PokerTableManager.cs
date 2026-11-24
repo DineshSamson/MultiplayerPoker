@@ -46,6 +46,10 @@ public class PokerTableManager : NetworkBehaviour
             new FixedString512Bytes(""));
 
     private PokerGameEngine gameEngine;
+    private readonly Dictionary<int, ulong> dealtClients =
+        new Dictionary<int, ulong>();
+    private bool revealShowdownCards;
+    public int PrivateCardsHandNumber { get; private set; } = -1;
 
     public bool HasPrivateCards { get; private set; }
     public Card PrivateCard1 { get; private set; }
@@ -106,6 +110,8 @@ public class PokerTableManager : NetworkBehaviour
         }
 
         ClearLocalCards();
+        dealtClients.Clear();
+        revealShowdownCards = false;
         gameEngine = null;
 
         if (Instance == this)
@@ -147,6 +153,7 @@ public class PokerTableManager : NetworkBehaviour
                 (gameEngine.Stage == PokerStage.Showdown &&
                  gameEngine.IsPotSettled))
             {
+                gameEngine.Players.RemoveAll(p => p.SeatIndex == seat);
                 gameEngine.AddPlayer(seat);
             }
             else
@@ -174,7 +181,8 @@ public class PokerTableManager : NetworkBehaviour
                 }
             }
 
-            if (!occupied)
+            if (!occupied && (gameEngine.Stage == PokerStage.Waiting ||
+                gameEngine.IsPotSettled || !gameEngine.Players.Exists(p => p.SeatIndex == seat)))
                 return seat;
         }
 
@@ -233,37 +241,25 @@ public class PokerTableManager : NetworkBehaviour
         if (Players.Count < 2)
             return false;
 
+        // Register late arrivals after the previous hand is settled.
         int eligible = 0;
-
-        foreach (PokerPlayer enginePlayer in gameEngine.Players)
-        {
-            bool connected = false;
-
-            foreach (PokerPlayerData networkPlayer in Players)
-            {
-                if (networkPlayer.SeatIndex ==
-                    enginePlayer.SeatIndex &&
-                    networkPlayer.IsConnected)
-                {
-                    connected = true;
-                    break;
-                }
-            }
-
-            if (!connected)
-                return false;
-
-            if (enginePlayer.Chips > 0)
-                eligible++;
-        }
-
         foreach (PokerPlayerData networkPlayer in Players)
         {
+            if (!networkPlayer.IsConnected)
+                continue;
+
             PokerPlayer enginePlayer = gameEngine.Players.Find(
                 p => p.SeatIndex == networkPlayer.SeatIndex);
 
             if (enginePlayer == null)
-                return false;
+            {
+                gameEngine.AddPlayer(networkPlayer.SeatIndex, networkPlayer.Chips);
+                enginePlayer = gameEngine.Players.Find(
+                    p => p.SeatIndex == networkPlayer.SeatIndex);
+            }
+
+            if (enginePlayer != null && enginePlayer.Chips > 0)
+                eligible++;
         }
 
         return eligible >= 2;
@@ -274,14 +270,26 @@ public class PokerTableManager : NetworkBehaviour
         if (!IsServer || gameEngine == null)
             return;
 
+        gameEngine.Players.RemoveAll(p => !HasConnectedSeat(p.SeatIndex));
         ClearPrivateCardsClientRpc();
 
         HandResultText.Value = new FixedString512Bytes("");
 
+        revealShowdownCards = false;
+        dealtClients.Clear();
         gameEngine.StartHand();
+
+        foreach (PokerPlayerData networkPlayer in Players)
+        {
+            PokerPlayer player = gameEngine.Players.Find(
+                p => p.SeatIndex == networkPlayer.SeatIndex);
+            if (networkPlayer.IsConnected && HasValidHoleCards(player))
+                dealtClients[networkPlayer.SeatIndex] = networkPlayer.ClientId;
+        }
 
         HandNumber.Value++;
 
+        AdvanceAndSettle();
         SyncGameState();
         SendPrivateCardsToPlayers();
 
@@ -300,8 +308,30 @@ public class PokerTableManager : NetworkBehaviour
     private void ClearLocalCards()
     {
         HasPrivateCards = false;
+        PrivateCardsHandNumber = -1;
         PrivateCard1 = default;
         PrivateCard2 = default;
+    }
+
+    private static bool HasValidHoleCards(PokerPlayer player)
+    {
+        if (player == null || player.HoleCards == null ||
+            player.HoleCards.Length < 2)
+            return false;
+        for (int i = 0; i < 2; i++)
+        {
+            Card card = player.HoleCards[i];
+            if ((int)card.Rank < 2 || (int)card.Rank > 14 ||
+                (int)card.Suit < 0 || (int)card.Suit > 3)
+                return false;
+        }
+        return true;
+    }
+
+    private bool WasDealt(PokerPlayerData player)
+    {
+        return dealtClients.TryGetValue(player.SeatIndex, out ulong id)
+            && id == player.ClientId;
     }
 
     private void SendPrivateCardsToPlayers()
@@ -314,9 +344,7 @@ public class PokerTableManager : NetworkBehaviour
             PokerPlayer player = gameEngine.Players.Find(
                 p => p.SeatIndex == networkPlayer.SeatIndex);
 
-            if (player == null ||
-                player.HoleCards == null ||
-                player.HoleCards.Length < 2)
+            if (!WasDealt(networkPlayer) || !HasValidHoleCards(player))
                 continue;
 
             Card first = player.HoleCards[0];
@@ -338,6 +366,7 @@ public class PokerTableManager : NetworkBehaviour
             };
 
             ReceivePrivateCardsClientRpc(
+                HandNumber.Value,
                 (int)first.Suit,
                 (int)first.Rank,
                 (int)second.Suit,
@@ -348,6 +377,7 @@ public class PokerTableManager : NetworkBehaviour
 
     [ClientRpc]
     private void ReceivePrivateCardsClientRpc(
+        int handNumber,
         int suit1,
         int rank1,
         int suit2,
@@ -369,6 +399,7 @@ public class PokerTableManager : NetworkBehaviour
         PrivateCard2 = new Card(
             (CardSuit)suit2, (CardRank)rank2);
 
+        PrivateCardsHandNumber = handNumber;
         HasPrivateCards = true;
 
         Debug.Log("[CLIENT] Private cards received.");
@@ -424,10 +455,16 @@ public class PokerTableManager : NetworkBehaviour
         Debug.Log(
             $"[SERVER] Seat {seat + 1} performed {action}");
 
+        AdvanceAndSettle();
+        SyncGameState();
+        PrintGameState();
+    }
+
+    private void AdvanceAndSettle()
+    {
         int safety = 0;
 
-        while (gameEngine.Betting.IsRoundComplete() &&
-               gameEngine.Stage != PokerStage.Showdown &&
+        while (gameEngine.Stage != PokerStage.Showdown &&
                safety < 5)
         {
             safety++;
@@ -450,13 +487,19 @@ public class PokerTableManager : NetworkBehaviour
         {
             PotSettlement settlement = gameEngine.SettlePot();
 
+            // Only a contested, completed board may reveal hole cards.
+            int contenders = 0;
+            foreach (PokerPlayer player in gameEngine.Players)
+                if (!player.IsFolded && HasValidHoleCards(player))
+                    contenders++;
+            revealShowdownCards = gameEngine.CommunityCards.Count == 5
+                && contenders >= 2;
+
             PublishShowdownResult(settlement);
 
             Debug.Log("[SERVER] Showdown settled.");
         }
 
-        SyncGameState();
-        PrintGameState();
     }
 
     private void PublishFoldWinner(int amount)
@@ -465,8 +508,7 @@ public class PokerTableManager : NetworkBehaviour
 
         foreach (PokerPlayer player in gameEngine.Players)
         {
-            if (!player.IsFolded &&
-                player.TotalContribution > 0)
+            if (!player.IsFolded && HasValidHoleCards(player))
             {
                 winner = player;
                 break;
@@ -629,8 +671,30 @@ public class PokerTableManager : NetworkBehaviour
             PokerPlayer player = gameEngine.Players.Find(
                 p => p.SeatIndex == data.SeatIndex);
 
-            if (player == null)
+            data.HasDealtCards = WasDealt(data) && HasValidHoleCards(player);
+            data.RevealedCard1 = default;
+            data.RevealedCard2 = default;
+
+            if (!data.HasDealtCards || player == null)
+            {
+                if (player != null && data.IsConnected)
+                    data.Chips = player.Chips;
+                data.CurrentBet = 0;
+                data.TotalContribution = 0;
+                data.IsFolded = false;
+                data.IsAllIn = false;
+                data.HasActed = false;
+                data.LastAction = -1;
+                if (!data.Equals(Players[i])) Players[i] = data;
                 continue;
+            }
+
+            if (revealShowdownCards && gameEngine.Stage == PokerStage.Showdown
+                && !player.IsFolded)
+            {
+                data.RevealedCard1 = new FixedString64Bytes(player.HoleCards[0].ToString());
+                data.RevealedCard2 = new FixedString64Bytes(player.HoleCards[1].ToString());
+            }
 
             data.Chips = player.Chips;
             data.CurrentBet = player.CurrentBet;
@@ -676,24 +740,42 @@ public class PokerTableManager : NetworkBehaviour
         }
     }
 
+    private bool HasConnectedSeat(int seat)
+    {
+        foreach (PokerPlayerData player in Players)
+            if (player.SeatIndex == seat && player.IsConnected)
+                return true;
+        return false;
+    }
+
     private void OnClientDisconnected(ulong clientId)
     {
-        if (!IsServer)
+        if (!IsServer || gameEngine == null)
             return;
+
+        int seat = FindSeatForClient(clientId);
+        if (seat < 0) return;
 
         for (int i = 0; i < Players.Count; i++)
         {
-            if (Players[i].ClientId == clientId)
-            {
-                Players.RemoveAt(i);
-
-                Debug.Log(
-                    $"[SERVER] Client {clientId} disconnected.");
-                break;
-            }
+            if (Players[i].ClientId != clientId) continue;
+            Players.RemoveAt(i);
+            break;
         }
 
-        // Disconnect handling during a hand is pending.
+        if (gameEngine.Stage == PokerStage.Waiting)
+        {
+            gameEngine.Players.RemoveAll(p => p.SeatIndex == seat);
+        }
+        else if (!gameEngine.IsPotSettled && gameEngine.Betting != null)
+        {
+            // Keep contributions and all-in eligibility until settlement.
+            gameEngine.Betting.FoldDisconnectedPlayer(seat);
+            AdvanceAndSettle();
+        }
+
+        SyncGameState();
+        Debug.Log($"[SERVER] Seat {seat + 1} disconnected.");
     }
 
     private void OnPlayersChanged(
