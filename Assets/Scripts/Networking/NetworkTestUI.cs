@@ -2,6 +2,8 @@ using TMPro;
 using UnityEngine;
 using UnityEngine.UI;
 using Unity.Netcode;
+using UnityEngine.SceneManagement;
+using System.Collections;
 
 public class NetworkTestUI : MonoBehaviour
 {
@@ -13,6 +15,8 @@ public class NetworkTestUI : MonoBehaviour
     [SerializeField] private TMP_Text statusText;
     [SerializeField] private TMP_Text connectionStatusText;
 
+    private bool reloadPending;
+    private bool clientSession;
     private bool connecting;
     private bool stopping;
     private bool wasConnected;
@@ -52,12 +56,14 @@ public class NetworkTestUI : MonoBehaviour
             return;
 
         idleMessage = "Not connected";
+        clientSession = !server;
         connecting = !server;
         connectDeadline = Time.realtimeSinceStartup + 30f;
         bool started = server ? network.StartServer() : network.StartClient();
         if (!started)
         {
             connecting = false;
+            clientSession = false;
             idleMessage = server ? "Could not start server" : "Could not start client";
         }
         Refresh();
@@ -74,7 +80,34 @@ public class NetworkTestUI : MonoBehaviour
             stopping = true;
             network.Shutdown();
         }
+        if (clientSession) BeginReload();
         Refresh();
+    }
+
+    private void BeginReload()
+    {
+        if (reloadPending) return;
+        reloadPending = true;
+        StartCoroutine(ReloadClientScene());
+    }
+
+    private IEnumerator ReloadClientScene()
+    {
+        // Wait until NGO has fully completed shutdown.
+        yield return null;
+        while (NetworkManager.Singleton != null &&
+               (NetworkManager.Singleton.IsListening || NetworkManager.Singleton.ShutdownInProgress))
+            yield return null;
+
+        // NGO may preserve its manager across scene loads. Remove the old
+        // local manager so the scene can create a fresh one.
+        var network = NetworkManager.Singleton;
+        if (network != null)
+        {
+            Destroy(network.gameObject);
+            yield return null;
+        }
+        SceneManager.LoadScene(SceneManager.GetActiveScene().buildIndex);
     }
 
     private void Refresh()
@@ -84,6 +117,20 @@ public class NetworkTestUI : MonoBehaviour
         bool server = listening && network.IsServer;
         bool connected = listening && (server || network.IsConnectedClient);
 
+        if (reloadPending)
+        {
+            connectionPanel.SetActive(true);
+            connectedPanel.SetActive(false);
+            startServerButton.interactable = false;
+            startClientButton.interactable = false;
+            SetText(statusText, "Resetting connection...");
+            return;
+        }
+        if (clientSession && !listening && wasConnected)
+        {
+            BeginReload();
+            return;
+        }
         if (!listening) stopping = false;
         if (connected && !stopping)
         {
@@ -104,6 +151,11 @@ public class NetworkTestUI : MonoBehaviour
             {
                 stopping = true;
                 network.Shutdown();
+            }
+            if (clientSession)
+            {
+                BeginReload();
+                return;
             }
         }
 

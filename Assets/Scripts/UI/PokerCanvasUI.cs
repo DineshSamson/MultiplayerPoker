@@ -33,6 +33,7 @@ public class PokerCanvasUI : MonoBehaviour
     private Coroutine dealRoutine;
     private bool isDealing;
     private bool dealPending;
+    private float dealDeadline;
 
     [Header("Betting Controls")]
     [SerializeField] private Button foldButton;
@@ -46,6 +47,10 @@ public class PokerCanvasUI : MonoBehaviour
     [Header("Optional Betting Labels")]
     [SerializeField] private TMP_Text callButtonText;
     [SerializeField] private TMP_Text minimumRaiseText;
+
+    [Header("Raise Notification")]
+    [SerializeField] private TMP_Text raiseNotificationText;
+    private float raiseNotificationUntil;
 
     [Header("Winner Panel")]
     [SerializeField] private GameObject winnerPanel;
@@ -75,6 +80,7 @@ public class PokerCanvasUI : MonoBehaviour
         if (winnerPanel != null)
             winnerPanel.SetActive(false);
 
+        ClearRaiseNotification();
         SetButtonsInteractable(false);
         ResetCards();
     }
@@ -92,11 +98,11 @@ public class PokerCanvasUI : MonoBehaviour
     private void Update()
     {
         if (NetworkManager.Singleton == null ||
-            !NetworkManager.Singleton.IsClient)
+            !NetworkManager.Singleton.IsClient ||
+            !NetworkManager.Singleton.IsConnectedClient)
         {
             SetButtonsInteractable(false);
-            if (displayedHand != -1) { CancelDeal(); ResetCards(); }
-            displayedHand = -1;
+            ResetDisconnectedUI();
             return;
         }
 
@@ -106,13 +112,32 @@ public class PokerCanvasUI : MonoBehaviour
         if (table == null || !table.IsSpawned)
         {
             SetButtonsInteractable(false);
-            if (displayedHand != -1) { CancelDeal(); ResetCards(); }
-            displayedHand = -1;
+            ResetDisconnectedUI();
             return;
         }
 
         FindLocalPlayer();
         RefreshUI();
+    }
+
+    private void ResetDisconnectedUI()
+    {
+        ClearRaiseNotification();
+        if (displayedHand != -1 || table != null)
+        {
+            CancelDeal();
+            ResetCards();
+            foreach (var seat in seats)
+                if (seat != null) seat.ClearSeat();
+        }
+        table = null;
+        displayedHand = -1;
+        hasLocalPlayer = false;
+        localSeat = -1;
+        if (winnerPanel != null) winnerPanel.SetActive(false);
+        handNumberText.text = "HAND -";
+        stageText.text = "Waiting";
+        potText.text = "POT: 0";
     }
 
     private void FindLocalPlayer()
@@ -149,11 +174,13 @@ public class PokerCanvasUI : MonoBehaviour
 
         if (displayedHand != table.HandNumber.Value)
         {
+            ClearRaiseNotification();
             CancelDeal();
             ResetCards();
             displayedHand = table.HandNumber.Value;
             dealPending = displayedHand > 0 && dealAnimator != null &&
                 table.CurrentStage.Value == PokerStage.PreFlop;
+            dealDeadline = Time.realtimeSinceStartup + 2f;
         }
         RefreshSeats();
         RefreshCommunityCards();
@@ -167,6 +194,10 @@ public class PokerCanvasUI : MonoBehaviour
             isDealing = true;
             dealRoutine = StartCoroutine(DealPrivateCards());
         }
+        if (dealPending && !isDealing &&
+            ((hasLocalPlayer && !localPlayer.HasDealtCards) ||
+             Time.realtimeSinceStartup >= dealDeadline))
+            dealPending = false;
         if (!isDealing && !dealPending) RefreshSeatCards();
         RefreshBettingButtons();
         RefreshWinnerPanel();
@@ -332,6 +363,7 @@ public class PokerCanvasUI : MonoBehaviour
 
     private void OnDisable()
     {
+        ClearRaiseNotification();
         CancelDeal();
         displayedHand = -1;
     }
@@ -362,6 +394,8 @@ public class PokerCanvasUI : MonoBehaviour
     private void RefreshBettingButtons()
     {
         bool canAct = CanAct();
+        if (!canAct || Time.unscaledTime >= raiseNotificationUntil)
+            ClearRaiseNotification();
 
         int toCall = Mathf.Max(
             0,
@@ -470,31 +504,50 @@ public class PokerCanvasUI : MonoBehaviour
         if (!CanAct())
             return;
 
+        int minimumRaiseTo = table.CurrentBet.Value + table.MinimumRaise.Value;
+        int maximumRaiseTo = localPlayer.CurrentBet + localPlayer.Chips;
+
+        if (string.IsNullOrWhiteSpace(raiseInput.text))
+        {
+            ShowRaiseNotification($"Enter a raise amount. Minimum: {minimumRaiseTo} chips.");
+            return;
+        }
         if (!int.TryParse(raiseInput.text, out int amount))
         {
-            Debug.LogWarning("Enter a valid raise amount.");
+            ShowRaiseNotification("Enter a valid whole number of chips.");
             return;
         }
-
-        int minimumRaiseTo =
-            table.CurrentBet.Value +
-            table.MinimumRaise.Value;
-
-        int maximumRaiseTo =
-            localPlayer.CurrentBet +
-            localPlayer.Chips;
-
-        if (amount < minimumRaiseTo ||
-            amount > maximumRaiseTo)
+        if (amount < minimumRaiseTo)
         {
-            Debug.LogWarning(
-                $"Raise must be between " +
-                $"{minimumRaiseTo} and {maximumRaiseTo}");
-
+            ShowRaiseNotification($"Minimum raise to: {minimumRaiseTo} chips.");
+            return;
+        }
+        if (amount > maximumRaiseTo)
+        {
+            ShowRaiseNotification($"Maximum raise to: {maximumRaiseTo} chips.");
             return;
         }
 
+        ClearRaiseNotification();
         table.SubmitAction(PokerAction.Raise, amount);
+    }
+
+    private void ShowRaiseNotification(string message)
+    {
+        if (raiseNotificationText == null)
+        {
+            Debug.LogWarning(message);
+            return;
+        }
+        raiseNotificationText.text = message;
+        raiseNotificationUntil = Time.unscaledTime + 3f;
+    }
+
+    private void ClearRaiseNotification()
+    {
+        if (raiseNotificationText != null && raiseNotificationText.text.Length > 0)
+            raiseNotificationText.text = string.Empty;
+        raiseNotificationUntil = 0f;
     }
 
     private void OnAllIn()

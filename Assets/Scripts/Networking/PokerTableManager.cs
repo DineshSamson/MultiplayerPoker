@@ -41,6 +41,10 @@ public class PokerTableManager : NetworkBehaviour
     public NetworkVariable<int> HandNumber =
         new NetworkVariable<int>(0);
 
+    // Server-owned revision of the current betting opportunity.
+    public NetworkVariable<ulong> TurnSequenceId =
+        new NetworkVariable<ulong>(0);
+
     public NetworkVariable<FixedString512Bytes> HandResultText =
         new NetworkVariable<FixedString512Bytes>(
             new FixedString512Bytes(""));
@@ -64,6 +68,7 @@ public class PokerTableManager : NetworkBehaviour
 
     public override void OnNetworkSpawn()
     {
+        Instance = this;
         ClearLocalCards();
 
         Players.OnListChanged += OnPlayersChanged;
@@ -208,14 +213,18 @@ public class PokerTableManager : NetworkBehaviour
         if (!IsSpawned || !IsClient)
             return;
 
-        RequestNewHandServerRpc();
+        RequestNewHandServerRpc(HandNumber.Value);
     }
 
     [ServerRpc(RequireOwnership = false)]
     private void RequestNewHandServerRpc(
+        int requestedHand,
         ServerRpcParams rpcParams = default)
     {
         if (!IsServer || gameEngine == null)
+            return;
+
+        if (requestedHand != HandNumber.Value)
             return;
 
         if (FindSeatForClient(
@@ -288,6 +297,7 @@ public class PokerTableManager : NetworkBehaviour
         }
 
         HandNumber.Value++;
+        TurnSequenceId.Value++;
 
         AdvanceAndSettle();
         SyncGameState();
@@ -410,22 +420,33 @@ public class PokerTableManager : NetworkBehaviour
         if (!IsSpawned || !IsClient)
             return;
 
-        SubmitActionServerRpc(action, raiseTo);
+        SubmitActionServerRpc(action, raiseTo,
+            HandNumber.Value, TurnSequenceId.Value);
     }
 
     [ServerRpc(RequireOwnership = false)]
     private void SubmitActionServerRpc(
         PokerAction action,
         int raiseTo,
+        int requestedHand,
+        ulong requestedTurn,
         ServerRpcParams rpcParams = default)
     {
         if (!IsServer || gameEngine == null)
             return;
 
+        if (requestedHand != HandNumber.Value ||
+            requestedTurn != TurnSequenceId.Value)
+        {
+            Debug.Log("[SERVER] Stale or duplicate action rejected.");
+            return;
+        }
+
         int seat = FindSeatForClient(
             rpcParams.Receive.SenderClientId);
 
-        if (seat < 0)
+        if (seat < 0 || !dealtClients.TryGetValue(seat, out ulong dealtClient) ||
+            dealtClient != rpcParams.Receive.SenderClientId)
             return;
 
         if (gameEngine.Stage != PokerStage.PreFlop &&
@@ -451,6 +472,9 @@ public class PokerTableManager : NetworkBehaviour
                 $"[SERVER] Action rejected: {error}");
             return;
         }
+
+        // Consume the token only after a valid action.
+        TurnSequenceId.Value++;
 
         Debug.Log(
             $"[SERVER] Seat {seat + 1} performed {action}");
@@ -770,8 +794,13 @@ public class PokerTableManager : NetworkBehaviour
         else if (!gameEngine.IsPotSettled && gameEngine.Betting != null)
         {
             // Keep contributions and all-in eligibility until settlement.
+            int previousTurn = gameEngine.Betting.CurrentTurnSeat;
+            PokerStage previousStage = gameEngine.Stage;
             gameEngine.Betting.FoldDisconnectedPlayer(seat);
             AdvanceAndSettle();
+            if (previousStage != gameEngine.Stage ||
+                previousTurn != gameEngine.Betting.CurrentTurnSeat)
+                TurnSequenceId.Value++;
         }
 
         SyncGameState();
