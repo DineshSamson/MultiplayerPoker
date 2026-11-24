@@ -31,7 +31,19 @@ public class PokerSeatUI : MonoBehaviour
         chipsText.text = $"Chips: {player.Chips}";
         betText.text = $"Bet: {player.CurrentBet}";
 
-        if (player.IsFolded)
+        var table = PokerTableManager.Instance;
+        bool handComplete = table != null && table.IsSpawned &&
+            table.CurrentStage.Value == PokerStage.Showdown;
+
+        if (!player.IsConnected)
+            statusText.text = "DISCONNECTED";
+        else if (player.Chips <= 0 && (handComplete || !player.HasDealtCards))
+            statusText.text = "OUT OF CHIPS";
+        else if (!player.HasDealtCards)
+            statusText.text = "WAITING FOR NEXT HAND";
+        else if (handComplete)
+            statusText.text = "HAND COMPLETE";
+        else if (player.IsFolded)
             statusText.text = "FOLDED";
         else if (player.IsAllIn)
             statusText.text = "ALL-IN";
