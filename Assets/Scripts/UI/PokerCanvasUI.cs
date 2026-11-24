@@ -13,6 +13,13 @@ public class PokerCanvasUI : MonoBehaviour
     [SerializeField] private TMP_Text stageText;
     [SerializeField] private TMP_Text potText;
 
+    [Header("First Hand Waiting Panel")]
+    [SerializeField] private GameObject waitingPanel;
+    [SerializeField] private TMP_Text waitingTitleText;
+    [SerializeField] private TMP_Text waitingPlayerCountText;
+    [SerializeField] private TMP_Text waitingCountdownText;
+    [SerializeField] private TMP_Text waitingMessageText;
+
     [Header("Player Seats")]
     [SerializeField]
     private PokerSeatUI[] seats =
@@ -80,6 +87,7 @@ public class PokerCanvasUI : MonoBehaviour
         if (winnerPanel != null)
             winnerPanel.SetActive(false);
 
+        HideWaitingPanel();
         ClearRaiseNotification();
         SetButtonsInteractable(false);
         ResetCards();
@@ -122,6 +130,7 @@ public class PokerCanvasUI : MonoBehaviour
 
     private void ResetDisconnectedUI()
     {
+        HideWaitingPanel();
         ClearRaiseNotification();
         if (displayedHand != -1 || table != null)
         {
@@ -166,8 +175,8 @@ public class PokerCanvasUI : MonoBehaviour
         handNumberText.text =
             $"HAND {table.HandNumber.Value}";
 
-        stageText.text =
-            table.CurrentStage.Value.ToString();
+        stageText.text = table.CurrentStage.Value.ToString();
+        RefreshWaitingPanel();
 
         potText.text =
             $"POT: {table.TotalPot.Value}";
@@ -201,6 +210,41 @@ public class PokerCanvasUI : MonoBehaviour
         if (!isDealing && !dealPending) RefreshSeatCards();
         RefreshBettingButtons();
         RefreshWinnerPanel();
+    }
+
+    private void HideWaitingPanel()
+    {
+        if (waitingPanel != null && waitingPanel.activeSelf)
+            waitingPanel.SetActive(false);
+    }
+
+    private void RefreshWaitingPanel()
+    {
+        if (waitingPanel == null) return;
+        bool show = table.CurrentStage.Value == PokerStage.Waiting &&
+                    table.HandNumber.Value == 0;
+        if (!show)
+        {
+            HideWaitingPanel();
+            return;
+        }
+
+        int count = 0;
+        foreach (PokerPlayerData player in table.Players)
+            if (player.IsConnected) count++;
+
+        int seconds = table.FirstHandCountdown.Value;
+        bool counting = count >= 2 && seconds >= 0;
+        SetWaitingText(waitingTitleText, counting ? "GAME STARTING SOON" : "WAITING FOR PLAYERS");
+        SetWaitingText(waitingPlayerCountText, $"{count} / 6 Players Connected");
+        SetWaitingText(waitingCountdownText, counting ? $"{seconds:00}" : "--");
+        SetWaitingText(waitingMessageText, counting ? "Game starting in seconds" : "Minimum 2 players required");
+        if (!waitingPanel.activeSelf) waitingPanel.SetActive(true);
+    }
+
+    private static void SetWaitingText(TMP_Text label, string value)
+    {
+        if (label != null && label.text != value) label.text = value;
     }
 
     private void RefreshSeats()
@@ -363,6 +407,7 @@ public class PokerCanvasUI : MonoBehaviour
 
     private void OnDisable()
     {
+        HideWaitingPanel();
         ClearRaiseNotification();
         CancelDeal();
         displayedHand = -1;

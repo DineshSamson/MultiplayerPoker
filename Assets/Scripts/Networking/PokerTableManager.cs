@@ -11,6 +11,10 @@ public class PokerTableManager : NetworkBehaviour
 
     private const int MaxPlayers = 6;
 
+    [SerializeField, Min(1f)] private float firstHandCountdownSeconds = 15f;
+    public NetworkVariable<int> FirstHandCountdown = new NetworkVariable<int>(-1);
+    private double firstHandDeadline = -1;
+
     public NetworkList<PokerPlayerData> Players;
     public NetworkList<FixedString64Bytes> CommunityCards;
 
@@ -79,7 +83,19 @@ public class PokerTableManager : NetworkBehaviour
 
         if (IsServer)
         {
+            // A new server session must not retain the previous session's
+            // replicated state when the scene is reused in Play Mode.
             gameEngine = new PokerGameEngine();
+            dealtClients.Clear();
+            revealShowdownCards = false;
+            Players.Clear();
+            CommunityCards.Clear();
+            HandNumber.Value = 0;
+            TurnSequenceId.Value = 0;
+            HandResultText.Value = new FixedString512Bytes("");
+            firstHandDeadline = -1;
+            FirstHandCountdown.Value = -1;
+            SyncGameState();
 
             NetworkManager.OnClientConnectedCallback +=
                 OnClientConnected;
@@ -118,6 +134,7 @@ public class PokerTableManager : NetworkBehaviour
         dealtClients.Clear();
         revealShowdownCards = false;
         gameEngine = null;
+        firstHandDeadline = -1;
 
         if (Instance == this)
             Instance = null;
@@ -194,18 +211,42 @@ public class PokerTableManager : NetworkBehaviour
         return -1;
     }
 
+    private void Update()
+    {
+        if (IsSpawned && IsServer && gameEngine != null &&
+            gameEngine.Stage == PokerStage.Waiting)
+            TryStartFirstHand();
+    }
+
     private void TryStartFirstHand()
     {
-        if (!IsServer || gameEngine == null)
+        if (!IsSpawned || !IsServer || gameEngine == null ||
+            gameEngine.Stage != PokerStage.Waiting)
             return;
 
-        if (gameEngine.Stage != PokerStage.Waiting)
+        int count = gameEngine.Players.Count;
+        if (count < 2)
+        {
+            firstHandDeadline = -1;
+            FirstHandCountdown.Value = -1;
             return;
+        }
 
-        if (gameEngine.Players.Count < 2)
+        double now = Time.realtimeSinceStartupAsDouble;
+        if (firstHandDeadline < 0)
+            firstHandDeadline = now + Mathf.Max(1f, firstHandCountdownSeconds);
+
+        if (count >= MaxPlayers || now >= firstHandDeadline)
+        {
+            firstHandDeadline = -1;
+            FirstHandCountdown.Value = -1;
+            StartNewHandInternal();
             return;
+        }
 
-        StartNewHandInternal();
+        int remaining = Mathf.CeilToInt((float)(firstHandDeadline - now));
+        if (FirstHandCountdown.Value != remaining)
+            FirstHandCountdown.Value = remaining;
     }
 
     public void RequestNewHand()
@@ -790,6 +831,7 @@ public class PokerTableManager : NetworkBehaviour
         if (gameEngine.Stage == PokerStage.Waiting)
         {
             gameEngine.Players.RemoveAll(p => p.SeatIndex == seat);
+            TryStartFirstHand();
         }
         else if (!gameEngine.IsPotSettled && gameEngine.Betting != null)
         {
