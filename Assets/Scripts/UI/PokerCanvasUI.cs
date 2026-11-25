@@ -103,6 +103,73 @@ public class PokerCanvasUI : MonoBehaviour
         newHandButton.onClick.RemoveListener(OnNewHand);
     }
 
+    // Poll lightweight value snapshots; rebuild UI only when state changes.
+    private bool snapshotValid;
+    private PokerTableManager snapshotTable;
+    private ulong snapshotClient;
+    private int snapshotHand, snapshotPot, snapshotTurn, snapshotBet, snapshotRaise, snapshotCountdown;
+    private PokerStage snapshotStage;
+    private bool snapshotHasCards;
+    private int snapshotPrivateHand;
+    private Card snapshotCard1, snapshotCard2;
+    private Unity.Collections.FixedString512Bytes snapshotResult;
+    private readonly PokerPlayerData[] snapshotPlayers = new PokerPlayerData[6];
+    private readonly Unity.Collections.FixedString64Bytes[] snapshotBoard = new Unity.Collections.FixedString64Bytes[5];
+    private int snapshotPlayerCount, snapshotBoardCount;
+
+    private bool CaptureChangedState()
+    {
+        ulong client = NetworkManager.Singleton.LocalClientId;
+        int playerCount = table.Players.Count;
+        int boardCount = table.CommunityCards.Count;
+        // Fall back to normal refresh if the table ever exceeds its expected capacity.
+        if (playerCount > snapshotPlayers.Length || boardCount > snapshotBoard.Length)
+        {
+            snapshotValid = false;
+            return true;
+        }
+        bool changed = !snapshotValid || snapshotTable != table || snapshotClient != client ||
+            snapshotHand != table.HandNumber.Value || snapshotPot != table.TotalPot.Value ||
+            snapshotTurn != table.CurrentTurnSeat.Value || snapshotBet != table.CurrentBet.Value ||
+            snapshotRaise != table.MinimumRaise.Value || snapshotCountdown != table.FirstHandCountdown.Value ||
+            snapshotStage != table.CurrentStage.Value || snapshotHasCards != table.HasPrivateCards ||
+            snapshotPrivateHand != table.PrivateCardsHandNumber ||
+            snapshotCard1.Rank != table.PrivateCard1.Rank || snapshotCard1.Suit != table.PrivateCard1.Suit ||
+            snapshotCard2.Rank != table.PrivateCard2.Rank || snapshotCard2.Suit != table.PrivateCard2.Suit ||
+            !snapshotResult.Equals(table.HandResultText.Value) ||
+            snapshotPlayerCount != playerCount || snapshotBoardCount != boardCount;
+        for (int i = 0; i < playerCount; i++)
+        {
+            var player = table.Players[i];
+            if (!snapshotPlayers[i].Equals(player)) changed = true;
+            snapshotPlayers[i] = player;
+        }
+        for (int i = 0; i < boardCount; i++)
+        {
+            var card = table.CommunityCards[i];
+            if (!snapshotBoard[i].Equals(card)) changed = true;
+            snapshotBoard[i] = card;
+        }
+        snapshotValid = true;
+        snapshotTable = table;
+        snapshotClient = client;
+        snapshotHand = table.HandNumber.Value;
+        snapshotPot = table.TotalPot.Value;
+        snapshotTurn = table.CurrentTurnSeat.Value;
+        snapshotBet = table.CurrentBet.Value;
+        snapshotRaise = table.MinimumRaise.Value;
+        snapshotCountdown = table.FirstHandCountdown.Value;
+        snapshotStage = table.CurrentStage.Value;
+        snapshotHasCards = table.HasPrivateCards;
+        snapshotPrivateHand = table.PrivateCardsHandNumber;
+        snapshotCard1 = table.PrivateCard1;
+        snapshotCard2 = table.PrivateCard2;
+        snapshotResult = table.HandResultText.Value;
+        snapshotPlayerCount = playerCount;
+        snapshotBoardCount = boardCount;
+        return changed;
+    }
+
     private void Update()
     {
         if (NetworkManager.Singleton == null ||
@@ -124,12 +191,21 @@ public class PokerCanvasUI : MonoBehaviour
             return;
         }
 
-        FindLocalPlayer();
-        RefreshUI();
+        bool changed = CaptureChangedState();
+        if (changed || (dealPending && Time.realtimeSinceStartup >= dealDeadline))
+        {
+            FindLocalPlayer();
+            RefreshUI();
+        }
+        // Notification expiry must work even when no network state changes.
+        if (raiseNotificationUntil > 0f && Time.unscaledTime >= raiseNotificationUntil)
+            ClearRaiseNotification();
     }
 
     private void ResetDisconnectedUI()
     {
+        snapshotValid = false;
+        snapshotTable = null;
         HideWaitingPanel();
         ClearRaiseNotification();
         if (displayedHand != -1 || table != null)
@@ -402,11 +478,14 @@ public class PokerCanvasUI : MonoBehaviour
         }
         isDealing = false;
         dealRoutine = null;
+        snapshotValid = false;
         RefreshSeatCards();
     }
 
     private void OnDisable()
     {
+        snapshotValid = false;
+        snapshotTable = null;
         HideWaitingPanel();
         ClearRaiseNotification();
         CancelDeal();

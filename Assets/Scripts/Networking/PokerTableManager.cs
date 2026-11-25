@@ -106,7 +106,9 @@ public class PokerTableManager : NetworkBehaviour
             foreach (ulong id in NetworkManager.ConnectedClientsIds)
                 AddPlayer(id);
 
+#if UNITY_EDITOR || DEVELOPMENT_BUILD
             Debug.Log("[SERVER] Poker engine initialized.");
+#endif
             SyncGameState();
         }
 
@@ -166,8 +168,10 @@ public class PokerTableManager : NetworkBehaviour
 
         Players.Add(new PokerPlayerData(clientId, seat));
 
+#if UNITY_EDITOR || DEVELOPMENT_BUILD
         Debug.Log(
             $"[SERVER] Client {clientId} joined Seat {seat + 1}");
+#endif
 
         if (gameEngine != null)
         {
@@ -180,8 +184,11 @@ public class PokerTableManager : NetworkBehaviour
             }
             else
             {
+
+#if UNITY_EDITOR || DEVELOPMENT_BUILD
                 Debug.Log(
                     $"[SERVER] Seat {seat + 1} waiting for next hand.");
+#endif
             }
         }
 
@@ -344,8 +351,10 @@ public class PokerTableManager : NetworkBehaviour
         SyncGameState();
         SendPrivateCardsToPlayers();
 
+#if UNITY_EDITOR || DEVELOPMENT_BUILD
         Debug.Log(
             $"[SERVER] ===== HAND {HandNumber.Value} STARTED =====");
+#endif
 
         PrintGameState();
     }
@@ -453,7 +462,9 @@ public class PokerTableManager : NetworkBehaviour
         PrivateCardsHandNumber = handNumber;
         HasPrivateCards = true;
 
+#if UNITY_EDITOR || DEVELOPMENT_BUILD
         Debug.Log("[CLIENT] Private cards received.");
+#endif
     }
 
     public void SubmitAction(PokerAction action, int raiseTo = 0)
@@ -479,7 +490,10 @@ public class PokerTableManager : NetworkBehaviour
         if (requestedHand != HandNumber.Value ||
             requestedTurn != TurnSequenceId.Value)
         {
+
+#if UNITY_EDITOR || DEVELOPMENT_BUILD
             Debug.Log("[SERVER] Stale or duplicate action rejected.");
+#endif
             return;
         }
 
@@ -517,8 +531,10 @@ public class PokerTableManager : NetworkBehaviour
         // Consume the token only after a valid action.
         TurnSequenceId.Value++;
 
+#if UNITY_EDITOR || DEVELOPMENT_BUILD
         Debug.Log(
             $"[SERVER] Seat {seat + 1} performed {action}");
+#endif
 
         AdvanceAndSettle();
         SyncGameState();
@@ -562,7 +578,9 @@ public class PokerTableManager : NetworkBehaviour
 
             PublishShowdownResult(settlement);
 
+#if UNITY_EDITOR || DEVELOPMENT_BUILD
             Debug.Log("[SERVER] Showdown settled.");
+#endif
         }
 
     }
@@ -591,7 +609,9 @@ public class PokerTableManager : NetworkBehaviour
         HandResultText.Value =
             new FixedString512Bytes(message);
 
+#if UNITY_EDITOR || DEVELOPMENT_BUILD
         Debug.Log("[SERVER] " + message);
+#endif
     }
 
     private void PublishShowdownResult(PotSettlement settlement)
@@ -666,7 +686,9 @@ public class PokerTableManager : NetworkBehaviour
         HandResultText.Value =
             new FixedString512Bytes(message);
 
+#if UNITY_EDITOR || DEVELOPMENT_BUILD
         Debug.Log("[SERVER] " + message);
+#endif
     }
 
     private string FormatHandRank(HandRank rank)
@@ -846,7 +868,10 @@ public class PokerTableManager : NetworkBehaviour
         }
 
         SyncGameState();
+
+#if UNITY_EDITOR || DEVELOPMENT_BUILD
         Debug.Log($"[SERVER] Seat {seat + 1} disconnected.");
+#endif
     }
 
     private void OnPlayersChanged(
@@ -858,35 +883,54 @@ public class PokerTableManager : NetworkBehaviour
     private void OnStageChanged(
         PokerStage previous, PokerStage current)
     {
+
+#if UNITY_EDITOR || DEVELOPMENT_BUILD
         Debug.Log($"[NETWORK] Stage: {current}");
+#endif
     }
 
     private void OnPotChanged(int previous, int current)
     {
+
+#if UNITY_EDITOR || DEVELOPMENT_BUILD
         Debug.Log($"[NETWORK] Pot: {current}");
+#endif
     }
 
     private void OnTurnChanged(int previous, int current)
     {
+
+#if UNITY_EDITOR || DEVELOPMENT_BUILD
         Debug.Log(
             current < 0
                 ? "[NETWORK] Current Turn: None"
                 : $"[NETWORK] Current Turn: Seat {current + 1}");
+#endif
     }
 
     private void OnCommunityCardsChanged(
         NetworkListEvent<FixedString64Bytes> changeEvent)
     {
+
+#if UNITY_EDITOR || DEVELOPMENT_BUILD
         Debug.Log(
             $"[NETWORK] Community Cards: {CommunityCards.Count}");
+#endif
     }
 
+    [System.Diagnostics.Conditional("UNITY_EDITOR")]
+    [System.Diagnostics.Conditional("DEVELOPMENT_BUILD")]
     private void PrintPlayers()
     {
+
+#if UNITY_EDITOR || DEVELOPMENT_BUILD
         Debug.Log($"Poker Table: {Players.Count} players");
+#endif
 
         foreach (var player in Players)
         {
+
+#if UNITY_EDITOR || DEVELOPMENT_BUILD
             Debug.Log(
                 $"Seat {player.SeatIndex + 1} | " +
                 $"Client {player.ClientId} | " +
@@ -894,28 +938,62 @@ public class PokerTableManager : NetworkBehaviour
                 $"Bet {player.CurrentBet} | " +
                 $"Folded {player.IsFolded} | " +
                 $"AllIn {player.IsAllIn}");
+#endif
         }
     }
 
+    [System.Diagnostics.Conditional("UNITY_EDITOR")]
+    [System.Diagnostics.Conditional("DEVELOPMENT_BUILD")]
     private void PrintGameState()
     {
-        Debug.Log("===== SYNCHRONIZED GAME STATE =====");
-        Debug.Log($"Hand: {HandNumber.Value}");
-        Debug.Log($"Stage: {CurrentStage.Value}");
-        Debug.Log($"Dealer: {DealerSeat.Value + 1}");
-        Debug.Log($"Small Blind: {SmallBlindSeat.Value + 1}");
-        Debug.Log($"Big Blind: {BigBlindSeat.Value + 1}");
-        Debug.Log($"Pot: {TotalPot.Value}");
-        Debug.Log($"Current Bet: {CurrentBet.Value}");
-        Debug.Log($"Minimum Raise: {MinimumRaise.Value}");
 
+#if UNITY_EDITOR || DEVELOPMENT_BUILD
+        Debug.Log("===== SYNCHRONIZED GAME STATE =====");
+#endif
+
+#if UNITY_EDITOR || DEVELOPMENT_BUILD
+        Debug.Log($"Hand: {HandNumber.Value}");
+#endif
+
+#if UNITY_EDITOR || DEVELOPMENT_BUILD
+        Debug.Log($"Stage: {CurrentStage.Value}");
+#endif
+
+#if UNITY_EDITOR || DEVELOPMENT_BUILD
+        Debug.Log($"Dealer: {DealerSeat.Value + 1}");
+#endif
+
+#if UNITY_EDITOR || DEVELOPMENT_BUILD
+        Debug.Log($"Small Blind: {SmallBlindSeat.Value + 1}");
+#endif
+
+#if UNITY_EDITOR || DEVELOPMENT_BUILD
+        Debug.Log($"Big Blind: {BigBlindSeat.Value + 1}");
+#endif
+
+#if UNITY_EDITOR || DEVELOPMENT_BUILD
+        Debug.Log($"Pot: {TotalPot.Value}");
+#endif
+
+#if UNITY_EDITOR || DEVELOPMENT_BUILD
+        Debug.Log($"Current Bet: {CurrentBet.Value}");
+#endif
+
+#if UNITY_EDITOR || DEVELOPMENT_BUILD
+        Debug.Log($"Minimum Raise: {MinimumRaise.Value}");
+#endif
+
+#if UNITY_EDITOR || DEVELOPMENT_BUILD
         Debug.Log(
             CurrentTurnSeat.Value < 0
                 ? "Current Turn: None"
                 : $"Current Turn: {CurrentTurnSeat.Value + 1}");
+#endif
 
+#if UNITY_EDITOR || DEVELOPMENT_BUILD
         Debug.Log(
             $"Community Cards: {CommunityCards.Count}");
+#endif
 
         PrintPlayers();
     }
