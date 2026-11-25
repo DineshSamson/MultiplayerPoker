@@ -4,6 +4,9 @@ using UnityEngine.UI;
 using Unity.Netcode;
 using UnityEngine.SceneManagement;
 using System.Collections;
+using System;
+using UnityEngine.Networking;
+using Unity.Netcode.Transports.UTP;
 
 public class NetworkTestUI : MonoBehaviour
 {
@@ -15,6 +18,14 @@ public class NetworkTestUI : MonoBehaviour
     [SerializeField] private TMP_Text statusText;
     [SerializeField] private TMP_Text connectionStatusText;
 
+    private const string ConfigUrl = "https://raw.githubusercontent.com/DineshSamson/MultiplayerPoker/main/server-config.json";
+    [Serializable]
+    private class ServerConfig
+    {
+        public string serverUrl;
+        public int port;
+    }
+    private bool fetchingConfig;
     private bool reloadPending;
     private bool clientSession;
     private bool connecting;
@@ -44,7 +55,69 @@ public class NetworkTestUI : MonoBehaviour
     private void Update() => Refresh();
 
     private void StartServer() => StartNetwork(true);
-    private void StartClient() => StartNetwork(false);
+    private void StartClient()
+    {
+#if UNITY_WEBGL && !UNITY_EDITOR
+        var network = NetworkManager.Singleton;
+        if (network == null || network.IsListening || fetchingConfig || connecting || stopping || reloadPending)
+            return;
+        fetchingConfig = true;
+        StartCoroutine(FetchServerConfig());
+#else
+        StartNetwork(false);
+#endif
+    }
+
+    private IEnumerator FetchServerConfig()
+    {
+        Refresh();
+        string url = ConfigUrl + "?t=" + DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+        using (var request = UnityWebRequest.Get(url))
+        {
+            request.timeout = 15;
+            yield return request.SendWebRequest();
+            if (request.result != UnityWebRequest.Result.Success)
+            {
+                ConfigFailed("Could not download server configuration. Please retry.");
+                yield break;
+            }
+            ServerConfig config = null;
+            try { config = JsonUtility.FromJson<ServerConfig>(request.downloadHandler.text); }
+            catch (Exception) { }
+            if (config == null || !Uri.TryCreate(config.serverUrl, UriKind.Absolute, out var endpoint) ||
+                endpoint.Scheme != "wss" || config.port != 443 || endpoint.Port != 443 ||
+                !endpoint.Host.EndsWith(".trycloudflare.com", StringComparison.OrdinalIgnoreCase) ||
+                endpoint.AbsolutePath != "/" || endpoint.Query.Length != 0 ||
+                endpoint.Fragment.Length != 0 || endpoint.UserInfo.Length != 0)
+            {
+                ConfigFailed("Invalid server configuration. Please retry later.");
+                yield break;
+            }
+            var network = NetworkManager.Singleton;
+            var transport = network != null ? network.NetworkConfig.NetworkTransport as UnityTransport : null;
+            if (transport == null || network.IsListening)
+            {
+                ConfigFailed("Unity Transport unavailable.");
+                yield break;
+            }
+            transport.UseWebSockets = true;
+            transport.UseEncryption = true;
+            // WebGL WSS uses the hostname supplied via SetClientSecrets.
+            // Keep a numeric endpoint for transport endpoint validation.
+            transport.SetConnectionData("127.0.0.1", (ushort)config.port);
+            transport.SetClientSecrets(endpoint.Host);
+        }
+        fetchingConfig = false;
+        StartNetwork(false);
+    }
+
+    private void ConfigFailed(string message)
+    {
+        fetchingConfig = false;
+        idleMessage = message;
+        Debug.LogWarning(message);
+        Refresh();
+    }
 
     private void StartNetwork(bool server)
     {
@@ -52,7 +125,7 @@ public class NetworkTestUI : MonoBehaviour
         if (server) return;
 #endif
         var network = NetworkManager.Singleton;
-        if (network == null || network.IsListening || connecting || stopping)
+        if (network == null || network.IsListening || fetchingConfig || connecting || stopping || reloadPending)
             return;
 
         idleMessage = "Not connected";
@@ -165,12 +238,12 @@ public class NetworkTestUI : MonoBehaviour
         if (connectedPanel.activeSelf != showConnected)
             connectedPanel.SetActive(showConnected);
 
-        bool canStart = network != null && !listening && !connecting && !stopping;
+        bool canStart = network != null && !listening && !fetchingConfig && !connecting && !stopping;
         startServerButton.interactable = canStart;
         startClientButton.interactable = canStart;
         disconnectButton.interactable = !stopping;
         SetText(statusText, network == null ? "NetworkManager unavailable" :
-            stopping ? "Disconnecting..." : connecting || (listening && !connected) ? "Connecting..." : idleMessage);
+            fetchingConfig ? "Finding server..." : stopping ? "Disconnecting..." : connecting || (listening && !connected) ? "Connecting..." : idleMessage);
         if (showConnected)
             SetText(connectionStatusText, server ?
                 $"Server Running | Clients: {network.ConnectedClientsIds.Count}" : "Client Connected");
