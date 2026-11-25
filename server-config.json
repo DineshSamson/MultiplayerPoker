@@ -1,0 +1,4 @@
+{
+  "serverUrl": "wss://https://drill-secondary-plc-apps.trycloudflare.com",
+  "port": 443
+}
