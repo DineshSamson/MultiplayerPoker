@@ -14,6 +14,12 @@ public class PokerSeatUI : MonoBehaviour
     [Header("Private Card Position")]
     [SerializeField] private RectTransform cardHolder;
 
+    [Header("Additional Seat Visuals")]
+    [SerializeField] private Image seatBackground;
+    [SerializeField] private Sprite normalSprite, activeSprite, foldedSprite, allInSprite, disconnectedSprite;
+    [SerializeField] private CanvasGroup seatArtworkGroup;
+    [SerializeField] private PokerTurnTimerUI turnTimer;
+
     public RectTransform CardHolder => cardHolder;
 
     public void SetPlayer(
@@ -53,8 +59,20 @@ public class PokerSeatUI : MonoBehaviour
         else
             statusText.text = "PLAYING";
 
+        bool active = isCurrentTurn && player.IsConnected && !player.IsFolded && !player.IsAllIn;
         if (turnIndicator != null)
-            turnIndicator.enabled = isCurrentTurn;
+            turnIndicator.enabled = active;
+        Sprite sprite = !player.IsConnected ? disconnectedSprite :
+            player.IsFolded ? foldedSprite : player.IsAllIn ? allInSprite :
+            active ? activeSprite : normalSprite;
+        if (seatBackground != null)
+        {
+            if (sprite != null) seatBackground.sprite = sprite;
+            else if (normalSprite != null) seatBackground.sprite = normalSprite;
+        }
+        if (seatArtworkGroup != null)
+            seatArtworkGroup.alpha = !player.IsConnected ? 0.5f : player.IsFolded ? 0.6f : player.IsAllIn ? 0.8f : 1f;
+        if (turnTimer != null) turnTimer.SetSeat(player.SeatIndex);
     }
 
     public void ClearSeat()

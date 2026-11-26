@@ -14,6 +14,11 @@ public class PokerTableManager : NetworkBehaviour
     [SerializeField, Min(1f)] private float firstHandCountdownSeconds = 15f;
     public NetworkVariable<int> FirstHandCountdown = new NetworkVariable<int>(-1);
     private double firstHandDeadline = -1;
+    [SerializeField, Min(5f)] private float turnDurationSeconds = 30f;
+    public NetworkVariable<double> TurnDeadline = new NetworkVariable<double>(-1);
+    public NetworkVariable<float> TurnDuration = new NetworkVariable<float>(30f);
+    private ulong timedTurn = ulong.MaxValue;
+    private int timedSeat = -1;
 
     public NetworkList<PokerPlayerData> Players;
     public NetworkList<FixedString64Bytes> CommunityCards;
@@ -85,6 +90,10 @@ public class PokerTableManager : NetworkBehaviour
         {
             // A new server session must not retain the previous session's
             // replicated state when the scene is reused in Play Mode.
+            timedTurn = ulong.MaxValue;
+            timedSeat = -1;
+            TurnDeadline.Value = -1;
+            TurnDuration.Value = Mathf.Max(5f, turnDurationSeconds);
             gameEngine = new PokerGameEngine();
             dealtClients.Clear();
             revealShowdownCards = false;
@@ -223,6 +232,43 @@ public class PokerTableManager : NetworkBehaviour
         if (IsSpawned && IsServer && gameEngine != null &&
             gameEngine.Stage == PokerStage.Waiting)
             TryStartFirstHand();
+        if (IsSpawned && IsServer && gameEngine != null) TryExpireTurn();
+    }
+
+    private void TryExpireTurn()
+    {
+        if (TurnDeadline.Value < 0 || NetworkManager.ServerTime.Time < TurnDeadline.Value ||
+            gameEngine.Betting == null || gameEngine.IsPotSettled) return;
+        int seat = CurrentTurnSeat.Value;
+        if (seat < 0 || gameEngine.Betting.CurrentTurnSeat != seat) return;
+        if (gameEngine.Betting.TryAction(seat, PokerAction.Fold, 0, out string error))
+        {
+            TurnSequenceId.Value++;
+            AdvanceAndSettle();
+            SyncGameState();
+        }
+        else
+        {
+            Debug.LogWarning("[SERVER] Timeout fold rejected: " + error);
+            TurnDeadline.Value = -1;
+        }
+    }
+
+    private void SyncTurnTimer()
+    {
+        int seat = CurrentTurnSeat.Value;
+        if (seat < 0 || gameEngine.Stage == PokerStage.Waiting || gameEngine.Stage == PokerStage.Showdown)
+        {
+            TurnDeadline.Value = -1;
+            timedSeat = -1;
+            return;
+        }
+        if (timedSeat != seat || timedTurn != TurnSequenceId.Value)
+        {
+            timedSeat = seat;
+            timedTurn = TurnSequenceId.Value;
+            TurnDeadline.Value = NetworkManager.ServerTime.Time + TurnDuration.Value;
+        }
     }
 
     private void TryStartFirstHand()
@@ -518,6 +564,12 @@ public class PokerTableManager : NetworkBehaviour
             return;
         }
 
+        if (TurnDeadline.Value >= 0 && NetworkManager.ServerTime.Time >= TurnDeadline.Value)
+        {
+            TryExpireTurn();
+            return;
+        }
+
         bool success = gameEngine.Betting.TryAction(
             seat, action, raiseTo, out string error);
 
@@ -739,6 +791,8 @@ public class PokerTableManager : NetworkBehaviour
                 ? -1
                 : gameEngine.Betting.CurrentTurnSeat;
 
+        SyncTurnTimer();
+
         CurrentBet.Value =
             gameEngine.Betting == null ||
             gameEngine.Stage == PokerStage.Showdown
@@ -850,6 +904,13 @@ public class PokerTableManager : NetworkBehaviour
             break;
         }
 
+        // No seated players remain: discard the previous table session.
+        if (Players.Count == 0)
+        {
+            ResetEmptyTable();
+            return;
+        }
+
         if (gameEngine.Stage == PokerStage.Waiting)
         {
             gameEngine.Players.RemoveAll(p => p.SeatIndex == seat);
@@ -871,6 +932,25 @@ public class PokerTableManager : NetworkBehaviour
 
 #if UNITY_EDITOR || DEVELOPMENT_BUILD
         Debug.Log($"[SERVER] Seat {seat + 1} disconnected.");
+#endif
+    }
+
+    private void ResetEmptyTable()
+    {
+        gameEngine = new PokerGameEngine();
+        dealtClients.Clear();
+        revealShowdownCards = false;
+        ClearLocalCards();
+        HandNumber.Value = 0;
+        // Keep the action revision moving forward across table resets.
+        TurnSequenceId.Value++;
+        HandResultText.Value = new FixedString512Bytes("");
+        firstHandDeadline = -1;
+        FirstHandCountdown.Value = -1;
+        SyncGameState();
+
+#if UNITY_EDITOR || DEVELOPMENT_BUILD
+        Debug.Log("[SERVER] Empty poker table reset.");
 #endif
     }
 
