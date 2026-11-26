@@ -17,6 +17,10 @@ public class PokerTableManager : NetworkBehaviour
     [SerializeField, Min(5f)] private float turnDurationSeconds = 30f;
     public NetworkVariable<double> TurnDeadline = new NetworkVariable<double>(-1);
     public NetworkVariable<float> TurnDuration = new NetworkVariable<float>(30f);
+    [Header("Initial Card Dealing")]
+    [SerializeField, Min(0f)] private float dealingSecondsPerCard = 0.5f;
+    [SerializeField, Min(0f)] private float dealingBufferSeconds = 1.5f;
+    private double dealingEndsAt = -1;
     private ulong timedTurn = ulong.MaxValue;
     private int timedSeat = -1;
 
@@ -90,6 +94,7 @@ public class PokerTableManager : NetworkBehaviour
         {
             // A new server session must not retain the previous session's
             // replicated state when the scene is reused in Play Mode.
+            dealingEndsAt = -1;
             timedTurn = ulong.MaxValue;
             timedSeat = -1;
             TurnDeadline.Value = -1;
@@ -232,7 +237,15 @@ public class PokerTableManager : NetworkBehaviour
         if (IsSpawned && IsServer && gameEngine != null &&
             gameEngine.Stage == PokerStage.Waiting)
             TryStartFirstHand();
-        if (IsSpawned && IsServer && gameEngine != null) TryExpireTurn();
+        if (IsSpawned && IsServer && gameEngine != null)
+        {
+            if (dealingEndsAt >= 0 && NetworkManager.ServerTime.Time >= dealingEndsAt)
+            {
+                dealingEndsAt = -1;
+                SyncTurnTimer();
+            }
+            TryExpireTurn();
+        }
     }
 
     private void TryExpireTurn()
@@ -262,6 +275,13 @@ public class PokerTableManager : NetworkBehaviour
     {
         int seat = CurrentTurnSeat.Value;
         if (seat < 0 || gameEngine.Stage == PokerStage.Waiting || gameEngine.Stage == PokerStage.Showdown)
+        {
+            TurnDeadline.Value = -1;
+            timedSeat = -1;
+            dealingEndsAt = -1;
+            return;
+        }
+        if (dealingEndsAt >= 0 && NetworkManager.ServerTime.Time < dealingEndsAt)
         {
             TurnDeadline.Value = -1;
             timedSeat = -1;
@@ -394,6 +414,9 @@ public class PokerTableManager : NetworkBehaviour
                 dealtClients[networkPlayer.SeatIndex] = networkPlayer.ClientId;
         }
 
+        dealingEndsAt = NetworkManager.ServerTime.Time +
+            2 * dealtClients.Count * Mathf.Max(0f, dealingSecondsPerCard) +
+            Mathf.Max(0f, dealingBufferSeconds);
         HandNumber.Value++;
         TurnSequenceId.Value++;
 
@@ -568,7 +591,11 @@ public class PokerTableManager : NetworkBehaviour
             return;
         }
 
-        if (TurnDeadline.Value >= 0 && NetworkManager.ServerTime.Time >= TurnDeadline.Value)
+        if (TurnDeadline.Value < 0 ||
+            (dealingEndsAt >= 0 && NetworkManager.ServerTime.Time < dealingEndsAt))
+            return;
+
+        if (NetworkManager.ServerTime.Time >= TurnDeadline.Value)
         {
             TryExpireTurn();
             return;

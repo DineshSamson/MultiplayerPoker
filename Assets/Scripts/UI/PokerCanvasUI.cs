@@ -116,6 +116,7 @@ public class PokerCanvasUI : MonoBehaviour
     private ulong snapshotClient;
     private int snapshotHand, snapshotPot, snapshotTurn, snapshotBet, snapshotRaise, snapshotCountdown;
     private PokerStage snapshotStage;
+    private double snapshotTurnDeadline;
     private bool snapshotHasCards;
     private int snapshotPrivateHand;
     private Card snapshotCard1, snapshotCard2;
@@ -139,7 +140,8 @@ public class PokerCanvasUI : MonoBehaviour
             snapshotHand != table.HandNumber.Value || snapshotPot != table.TotalPot.Value ||
             snapshotTurn != table.CurrentTurnSeat.Value || snapshotBet != table.CurrentBet.Value ||
             snapshotRaise != table.MinimumRaise.Value || snapshotCountdown != table.FirstHandCountdown.Value ||
-            snapshotStage != table.CurrentStage.Value || snapshotHasCards != table.HasPrivateCards ||
+            snapshotStage != table.CurrentStage.Value || snapshotTurnDeadline != table.TurnDeadline.Value ||
+            snapshotHasCards != table.HasPrivateCards ||
             snapshotPrivateHand != table.PrivateCardsHandNumber ||
             snapshotCard1.Rank != table.PrivateCard1.Rank || snapshotCard1.Suit != table.PrivateCard1.Suit ||
             snapshotCard2.Rank != table.PrivateCard2.Rank || snapshotCard2.Suit != table.PrivateCard2.Suit ||
@@ -167,6 +169,7 @@ public class PokerCanvasUI : MonoBehaviour
         snapshotRaise = table.MinimumRaise.Value;
         snapshotCountdown = table.FirstHandCountdown.Value;
         snapshotStage = table.CurrentStage.Value;
+        snapshotTurnDeadline = table.TurnDeadline.Value;
         snapshotHasCards = table.HasPrivateCards;
         snapshotPrivateHand = table.PrivateCardsHandNumber;
         snapshotCard1 = table.PrivateCard1;
@@ -517,6 +520,8 @@ public class PokerCanvasUI : MonoBehaviour
             stage == PokerStage.River;
 
         return activeStage &&
+               table.TurnDeadline.Value >= 0 &&
+               NetworkManager.Singleton.ServerTime.Time < table.TurnDeadline.Value &&
                table.CurrentTurnSeat.Value == localSeat &&
                localPlayer.HasDealtCards &&
                !localPlayer.IsFolded &&
@@ -643,7 +648,7 @@ public class PokerCanvasUI : MonoBehaviour
         else if (!localPlayer.HasDealtCards) message = "You can join the next hand.";
         else if (localPlayer.IsFolded) message = "You folded. Wait for the next hand.";
         else if (localPlayer.IsAllIn) message = "You are all-in. Wait for the result.";
-        else if (isDealing || dealPending) message = "Dealing cards...";
+        else if (isDealing || dealPending || table.TurnDeadline.Value < 0) message = "Dealing cards...";
         else if (!CanAct()) message = "Waiting for another player.";
         else
         {
