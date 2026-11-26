@@ -24,11 +24,7 @@ public class PokerTurnTimerUI : MonoBehaviour
         { Hide(); return; }
         float remaining = Mathf.Max(0f, (float)(table.TurnDeadline.Value - net.ServerTime.Time));
         float fraction = Mathf.Clamp01(remaining / Mathf.Max(1f, table.TurnDuration.Value));
-        Color color = fraction > 0.5f ? new Color(0.2f, 0.9f, 0.3f) :
-            fraction > 0.2f ? new Color(1f, 0.65f, 0.1f) : new Color(1f, 0.2f, 0.2f);
-        if (ring != null) { ring.enabled = true; ring.fillAmount = fraction; ring.color = color; }
-        if (secondsText != null) { secondsText.enabled = true; secondsText.color = color;
-            string value = Mathf.CeilToInt(remaining) + "s";
-            if (secondsText.text != value) secondsText.text = value; }
+        if (ring != null) { ring.enabled = true; ring.fillAmount = fraction; }
+        if (secondsText != null) secondsText.enabled = false;
     }
 }

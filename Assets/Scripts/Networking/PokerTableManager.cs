@@ -241,7 +241,11 @@ public class PokerTableManager : NetworkBehaviour
             gameEngine.Betting == null || gameEngine.IsPotSettled) return;
         int seat = CurrentTurnSeat.Value;
         if (seat < 0 || gameEngine.Betting.CurrentTurnSeat != seat) return;
-        if (gameEngine.Betting.TryAction(seat, PokerAction.Fold, 0, out string error))
+        PokerPlayer player = gameEngine.Players.Find(p => p.SeatIndex == seat);
+        if (player == null) return;
+        PokerAction timeoutAction = gameEngine.Betting.CurrentBet <= player.CurrentBet
+            ? PokerAction.Check : PokerAction.Fold;
+        if (gameEngine.Betting.TryAction(seat, timeoutAction, 0, out string error))
         {
             TurnSequenceId.Value++;
             AdvanceAndSettle();
@@ -249,7 +253,7 @@ public class PokerTableManager : NetworkBehaviour
         }
         else
         {
-            Debug.LogWarning("[SERVER] Timeout fold rejected: " + error);
+            Debug.LogWarning("[SERVER] Timeout action rejected: " + error);
             TurnDeadline.Value = -1;
         }
     }

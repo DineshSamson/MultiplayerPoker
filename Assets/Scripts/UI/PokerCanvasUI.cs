@@ -64,6 +64,9 @@ public class PokerCanvasUI : MonoBehaviour
     [SerializeField] private TMP_Text winnerText;
     [SerializeField] private Button newHandButton;
 
+    [Header("Quick Raises and Guidance")]
+    [SerializeField] private Button halfPotButton, fullPotButton;
+    [SerializeField] private TMP_Text guidanceText;
     private PokerTableManager table;
     private PokerPlayerData localPlayer;
 
@@ -74,6 +77,8 @@ public class PokerCanvasUI : MonoBehaviour
 
     private void Start()
     {
+        if (halfPotButton != null) halfPotButton.onClick.AddListener(OnHalfPot);
+        if (fullPotButton != null) fullPotButton.onClick.AddListener(OnFullPot);
         foldButton.onClick.AddListener(OnFold);
         checkButton.onClick.AddListener(OnCheck);
         callButton.onClick.AddListener(OnCall);
@@ -95,6 +100,8 @@ public class PokerCanvasUI : MonoBehaviour
 
     private void OnDestroy()
     {
+        if (halfPotButton != null) halfPotButton.onClick.RemoveListener(OnHalfPot);
+        if (fullPotButton != null) fullPotButton.onClick.RemoveListener(OnFullPot);
         foldButton.onClick.RemoveListener(OnFold);
         checkButton.onClick.RemoveListener(OnCheck);
         callButton.onClick.RemoveListener(OnCall);
@@ -223,6 +230,7 @@ public class PokerCanvasUI : MonoBehaviour
         handNumberText.text = "HAND -";
         stageText.text = "Waiting";
         potText.text = "POT: 0";
+        SetWaitingText(guidanceText, "Connect to join a table.");
     }
 
     private void FindLocalPlayer()
@@ -286,6 +294,7 @@ public class PokerCanvasUI : MonoBehaviour
         if (!isDealing && !dealPending) RefreshSeatCards();
         RefreshBettingButtons();
         RefreshWinnerPanel();
+        RefreshGuidance();
     }
 
     private void HideWaitingPanel()
@@ -551,13 +560,15 @@ public class PokerCanvasUI : MonoBehaviour
         raiseInput.interactable =
             raiseButton.interactable;
 
+        if (halfPotButton != null) halfPotButton.interactable = raiseButton.interactable;
+        if (fullPotButton != null) fullPotButton.interactable = raiseButton.interactable;
         if (callButtonText != null)
         {
             int actualCall =
                 Mathf.Min(toCall, localPlayer.Chips);
 
             callButtonText.text = toCall > 0
-                ? $"CALL {actualCall}"
+                ? (toCall >= localPlayer.Chips ? $"CALL {actualCall} (ALL-IN)" : $"CALL {actualCall}")
                 : "CALL";
         }
 
@@ -596,6 +607,8 @@ public class PokerCanvasUI : MonoBehaviour
 
     private void SetButtonsInteractable(bool value)
     {
+        if (halfPotButton != null) halfPotButton.interactable = value;
+        if (fullPotButton != null) fullPotButton.interactable = value;
         foldButton.interactable = value;
         checkButton.interactable = value;
         callButton.interactable = value;
@@ -603,6 +616,43 @@ public class PokerCanvasUI : MonoBehaviour
         allInButton.interactable = value;
         raiseInput.interactable = value;
         newHandButton.interactable = value;
+    }
+
+    private void OnHalfPot() => SetQuickRaise(0.5f);
+    private void OnFullPot() => SetQuickRaise(1f);
+    private void SetQuickRaise(float fraction)
+    {
+        if (!CanAct() || !raiseButton.interactable) return;
+        int bet = table.CurrentBet.Value;
+        int toCall = Mathf.Max(0, bet - localPlayer.CurrentBet);
+        int min = bet + table.MinimumRaise.Value;
+        int max = localPlayer.CurrentBet + localPlayer.Chips;
+        if (max < min) return;
+        int target = bet + Mathf.FloorToInt((table.TotalPot.Value + toCall) * fraction);
+        raiseInput.text = Mathf.Clamp(target, min, max).ToString();
+        ClearRaiseNotification();
+    }
+
+    private void RefreshGuidance()
+    {
+        if (guidanceText == null) return;
+        string message;
+        if (table.CurrentStage.Value == PokerStage.Waiting) message = "Waiting for at least two players.";
+        else if (!hasLocalPlayer) message = "Waiting for a seat.";
+        else if (table.CurrentStage.Value == PokerStage.Showdown) message = "Hand complete. Start the next hand when ready.";
+        else if (!localPlayer.HasDealtCards) message = "You can join the next hand.";
+        else if (localPlayer.IsFolded) message = "You folded. Wait for the next hand.";
+        else if (localPlayer.IsAllIn) message = "You are all-in. Wait for the result.";
+        else if (isDealing || dealPending) message = "Dealing cards...";
+        else if (!CanAct()) message = "Waiting for another player.";
+        else
+        {
+            int call = Mathf.Max(0, table.CurrentBet.Value - localPlayer.CurrentBet);
+            message = call == 0 ? "Your turn: Check for free or bet/raise." :
+                $"Your turn: Call {Mathf.Min(call, localPlayer.Chips)} chips or fold.";
+            if (call > 0 && raiseButton.interactable) message += " You may also raise.";
+        }
+        SetWaitingText(guidanceText, message);
     }
 
     private void OnFold()
