@@ -34,8 +34,8 @@ public class PokerSeatUI : MonoBehaviour
             ? $"Seat {player.SeatIndex + 1} (YOU)"
             : $"Seat {player.SeatIndex + 1}";
 
-        chipsText.text = $"Chips: {player.Chips}";
-        betText.text = $"Bet: {player.CurrentBet}";
+        chipsText.text = $"{player.Chips}";
+        betText.text = $"{player.CurrentBet}";
 
         var table = PokerTableManager.Instance;
         bool handComplete = table != null && table.IsSpawned &&
