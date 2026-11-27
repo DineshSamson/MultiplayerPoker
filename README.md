@@ -289,7 +289,7 @@ The final Linux server and WebGL client were built from the final project. Final
 | Odd-chip allocation relative to dealer | Split-pot handling implemented; exact odd-chip ordering not independently verified in final build |
 | Clear UI and contextual guidance | Implemented |
 | Quick raises, custom raises and short-stack calls | Implemented |
-| Computer opponents | Omitted (optional under assignment wording) |
+| Computer opponents | Omitted due to time constraints |
 | Out-of-chips handling and chip reset | Partial: zero-chip players cannot continue betting; dedicated spectator/rebuy flow not confirmed |
 | Disconnect timeout and state-preserving reconnection | Partial: immediate fold when applicable; previous session is not restored |
 | Server disconnection handling | Connection status UI provided; final server-loss scenario not independently verified |
